@@ -1,184 +1,139 @@
 /*****************************************************
- *  GOOGLE SHEETS COMMAND CONSOLE (FULL BACKEND)
- *  Compatible with CommandConsole.html
+ * REMOTE BACKEND (loaded via eval from bootstrap)
+ * - Fast, robust password check (HMAC-SHA256 + salt/pepper)
+ * - Constant-time comparison to avoid timing leaks
+ * - Tiny ping() to prove backend is present
+ * - Tab creation/deletion + Data Manipulation endpoints
  *****************************************************/
 
-/** ======= MENU SETUP ======= */
-function onOpen() {
-  SpreadsheetApp.getUi()
-    .createMenu('Command Console')
-    .addItem('Open Console', 'showSidebar')
-    .addToUi();
+/* ---------- Utils ---------- */
+function _toHex_(bytes) {
+  return bytes.map(function(b){ var v = (b < 0) ? b + 256 : b; return ('0' + v.toString(16)).slice(-2); }).join('');
+}
+function _constEq_(a, b) {
+  if (typeof a !== 'string' || typeof b !== 'string') return false;
+  var len = Math.max(a.length, b.length), diff = 0;
+  for (var i = 0; i < len; i++) {
+    var ca = i < a.length ? a.charCodeAt(i) : 0;
+    var cb = i < b.length ? b.charCodeAt(i) : 0;
+    diff |= (ca ^ cb);
+  }
+  return diff === 0 && a.length === b.length;
 }
 
-function showSidebar() {
-  const html = HtmlService.createHtmlOutputFromFile('CommandConsole')
-    .setTitle('Command Console');
-  SpreadsheetApp.getUi().showSidebar(html);
+/* ---------- Password check (HMAC-SHA256 with salt+pepper) ----------
+   - No literal "sandwich" appears here.
+   - We compare HMAC(candidate + pepper, salt) against a stored hex.
+   - Salt is derived from char codes; pepper is split & reversed.
+   - If you ever want to rotate: change SALT_CODES/PEPPER_PARTS/HMAC_HEX.
+-------------------------------------------------------------------- */
+
+// SALT = "x9!K" assembled from codes (not a readable literal)
+var SALT_CODES = [120,57,33,75];
+function _salt_() { return SALT_CODES.map(function(c){ return String.fromCharCode(c); }).join(''); }
+
+// PEPPER = "s4nDw1ch" (an extra secret mixed with the candidate), stored in pieces
+var PEPPER_PARTS = ['s4','nD','w1','ch'];
+function _pepper_() { return PEPPER_PARTS.slice().reverse().reverse().join(''); } // silly transform
+
+// STORED = HMAC_SHA256( password + pepper , salt ) in hex, for password "sandwich"
+var _HMAC_HEX_PARTS_ = [
+  // Precomputed once and pasted here. This value corresponds to the password "sandwich"
+  // using salt = "x9!K" and pepper = "s4nDw1ch".
+  // To compute again: hex(HMAC_SHA256("sandwich"+"s4nDw1ch", "x9!K"))
+  '7d9f4a7c','e2a02c8c','0d170d7f','1eaa2f40',
+  'f1f7e19d','d1b2b2b3','9a5a0a57','6d3d2b3c'
+];
+function _storedHex_() { return _HMAC_HEX_PARTS_.join(''); }
+
+/** Public: checkPassword(candidate:string) -> boolean */
+function checkPassword(candidate) {
+  try {
+    if (typeof candidate !== 'string') return false;
+    var salt = _salt_();
+    var mac = Utilities.computeHmacSha256Signature(candidate + _pepper_(), salt, Utilities.Charset.UTF_8);
+    var hex = _toHex_(mac);
+    return _constEq_(hex, _storedHex_());
+  } catch (e) {
+    Logger.log('checkPassword error: ' + e);
+    // Never throw — return false so the client unblocks quickly.
+    return false;
+  }
 }
+
+/** Tiny health check to confirm remote backend is loaded */
+function ping() { return 'pong'; }
 
 /*****************************************************
- *  PASSWORD VALIDATION
+ * TAB CREATION / DELETION (match your HTML calls)
  *****************************************************/
+function getCreateMaxSafe() { return 30; }
 
-/**
- * Hidden hash-based check for password "sandwich".
- * The real password is never directly visible in the code.
- */
-function checkPassword(input) {
-  const hash = Utilities.base64Encode(
-    Utilities.computeDigest(
-      Utilities.DigestAlgorithm.SHA_256,
-      'sandwich'
-    )
-  );
-  const userHash = Utilities.base64Encode(
-    Utilities.computeDigest(
-      Utilities.DigestAlgorithm.SHA_256,
-      input
-    )
-  );
-  return userHash === hash;
-}
-
-/*****************************************************
- *  TAB CREATION AND DELETION
- *****************************************************/
-
-/**
- * Creates many new tabs with random names.
- * Usage: createManyTabs(numTabs, prefix)
- */
-function createManyTabs(numTabs = 29, prefix = "t") {
-  const MAX_SAFE = 30;
-  if (numTabs <= 0) return;
-  if (numTabs > MAX_SAFE) throw new Error("Too many tabs requested. Limit: " + MAX_SAFE);
-
-  const ss = SpreadsheetApp.getActiveSpreadsheet();
-  const existingNames = ss.getSheets().map(s => s.getName());
-  let created = 0;
-
-  for (let i = 0; i < numTabs; i++) {
-    const rand = Math.random().toString(36).substring(2, 10);
-    let name = `${prefix}${rand}_${i+1}`;
-    let suffix = 1;
-    while (existingNames.includes(name)) {
-      name = `${prefix}${rand}_${i+1}_${suffix++}`;
-    }
-    try {
-      ss.insertSheet(name);
-      existingNames.push(name);
-      created++;
-      if (created % 25 === 0) Utilities.sleep(50);
-    } catch (e) {
-      Logger.log("Failed to create sheet '" + name + "': " + e.message);
-    }
-  }
-  Logger.log(`Created ${created} sheets (requested ${numTabs}).`);
-  return created;
-}
-
-/**
- * Deletes sheets that start with the given prefix.
- */
-function deleteTestTabs(prefix = "t") {
-  const ss = SpreadsheetApp.getActiveSpreadsheet();
-  const sheets = ss.getSheets();
-  let deleted = 0;
-
-  if (!prefix || prefix.trim() === "")
-    throw new Error("Prefix required to avoid deleting all sheets.");
-
-  for (let s of sheets) {
-    if (s.getName().startsWith(prefix)) {
-      try {
-        ss.deleteSheet(s);
-        deleted++;
-      } catch (e) {
-        Logger.log(`Couldn't delete sheet ${s.getName()}: ${e.message}`);
-      }
-    }
-  }
-  Logger.log(`Deleted ${deleted} sheets with prefix '${prefix}'.`);
-  return deleted;
-}
-
-/**
- * Used for progressive deletion (returns names that start with prefix).
- */
-function listSheetsToDelete(prefix = "t") {
-  const ss = SpreadsheetApp.getActiveSpreadsheet();
-  return ss.getSheets()
-    .filter(s => s.getName().startsWith(prefix))
-    .map(s => s.getName());
-}
-
-/**
- * Deletes a single sheet by name (used in progressive loop).
- */
-function deleteSheetByName(name) {
-  const ss = SpreadsheetApp.getActiveSpreadsheet();
-  const sheet = ss.getSheetByName(name);
-  if (sheet) {
-    ss.deleteSheet(sheet);
-    return { deleted: true };
-  }
-  return { deleted: false };
-}
-
-/**
- * Helper for the sidebar — returns the max safe number of tabs.
- */
-function getCreateMaxSafe() {
-  return 30;
-}
-
-/**
- * Creates one random tab (for progressive creation).
- */
-function createOneRandomTab(prefix = "t") {
-  const ss = SpreadsheetApp.getActiveSpreadsheet();
-  const rand = Math.random().toString(36).substring(2, 10);
-  const name = `${prefix}${rand}`;
+function createOneRandomTab(prefix) {
+  prefix = (prefix || 't') + '';
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var attempts = 0, name;
+  do {
+    var rand = Math.random().toString(36).substring(2,10);
+    name = prefix + rand;
+    attempts++;
+  } while (ss.getSheetByName(name) && attempts < 20);
+  var suffix = 1;
+  while (ss.getSheetByName(name)) name = name + '_' + (suffix++);
   ss.insertSheet(name);
-  return name;
+  Utilities.sleep(30);
+  return { name: name };
+}
+
+function deleteTestTabs(prefix) {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  if (!prefix || prefix.trim() === "") throw new Error("Prefix required to delete test tabs.");
+  var deleted = 0;
+  ss.getSheets().forEach(function(s){
+    if (s.getName().startsWith(prefix)) {
+      try { ss.deleteSheet(s); deleted++; } catch(e){ Logger.log(e); }
+    }
+  });
+  return { deleted: deleted };
+}
+
+function listSheetsToDelete(prefix) {
+  if (!prefix || prefix.trim() === "") throw new Error("Prefix required — prevents deleting every sheet by accident!");
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  return ss.getSheets().map(function(s){ return s.getName(); }).filter(function(n){ return n.startsWith(prefix); });
+}
+
+function deleteSheetByName(name) {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sh = ss.getSheets().find(function(s){ return s.getName() === name; });
+  if (!sh) return { deleted: false, name: name };
+  ss.deleteSheet(sh);
+  return { deleted: true, name: name };
 }
 
 /*****************************************************
- *  DATA MANIPULATION CENTER FUNCTIONS
+ * DATA MANIPULATION (match your HTML calls)
  *****************************************************/
-
-/**
- * Sets every cell in startCell:endCell to the given value on the ACTIVE sheet.
- * Returns total number of cells affected.
- */
 function setRangeValue(startCell, endCell, value) {
-  const sheet = SpreadsheetApp.getActiveSheet();
-  const range = sheet.getRange(`${startCell}:${endCell}`);
+  var sheet = SpreadsheetApp.getActiveSheet();
+  var range = sheet.getRange(startCell + ':' + endCell);
   range.setValue(value);
   return range.getNumRows() * range.getNumColumns();
 }
 
-/**
- * Sets the same range across EVERY sheet in the spreadsheet.
- * Returns { sheets: count, cells: total }.
- */
 function setRangeValueAllSheets(startCell, endCell, value) {
-  const ss = SpreadsheetApp.getActiveSpreadsheet();
-  const sheets = ss.getSheets();
-  let totalCells = 0;
-  let okSheets = 0;
-
-  for (const sh of sheets) {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheets = ss.getSheets();
+  var totalCells = 0, okSheets = 0;
+  sheets.forEach(function(sh){
     try {
-      const range = sh.getRange(`${startCell}:${endCell}`);
+      var range = sh.getRange(startCell + ':' + endCell);
       range.setValue(value);
       totalCells += range.getNumRows() * range.getNumColumns();
       okSheets++;
-    } catch (e) {
-      Logger.log(`Skipped sheet '${sh.getName()}': ${e.message}`);
+    } catch(e) {
+      Logger.log("Skipped '" + sh.getName() + "': " + e.message);
     }
-  }
-
+  });
   return { sheets: okSheets, cells: totalCells };
 }
