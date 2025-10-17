@@ -1,184 +1,290 @@
-/*****************************************************
- *  GOOGLE SHEETS COMMAND CONSOLE (FULL BACKEND)
- *  Compatible with CommandConsole.html
- *****************************************************/
+<!DOCTYPE html>
+<html>
+  <head>
+    <base target="_top">
+    <style>
+      body { font-family: Arial, sans-serif; padding: 12px; }
+      .muted { color: #555; font-size: 12px; margin-top:6px; }
+      input[type="password"], input[type="text"], input[type="number"] { padding: 8px; box-sizing: border-box; }
+      input[type="password"] { width: 100%; }
+      button { padding: 8px 12px; margin-top:8px; cursor:pointer; }
+      #mainUI { display: none; }
+      .row { margin:8px 0; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+      .bar { width:100%; height:12px; background:#eee; border-radius:6px; overflow:hidden; }
+      .fill { width:0%; height:100%; background:#4caf50; transition: width 120ms linear; }
+      hr { margin:12px 0; border:0; border-top:1px solid #ddd; }
+      .divider-strong { margin:14px 0; border:0; border-top:3px solid #000; }
+      h2 { margin: 0 0 8px; }
+      h3 { margin: 16px 0 8px; }
+      .numInput { width: 90px; }
+      .prefixInput { width: 90px; }
+      .cellInput { width: 120px; }
+      .valueInput { width: 150px; }
+    </style>
+  </head>
+  <body>
+    <!-- LOCKED VIEW -->
+    <div id="locked">
+      <h2>Enter Password</h2>
+      <div class="muted">this console is password protected</div>
+      <div class="row"><input id="pw" type="password" placeholder="Password" /></div>
+      <div class="row"><button onclick="submitPassword()">Unlock</button></div>
+      <div id="pwMsg" class="muted"></div>
+    </div>
 
-/** ======= MENU SETUP ======= */
-function onOpen() {
-  SpreadsheetApp.getUi()
-    .createMenu('Command Console')
-    .addItem('Open Console', 'showSidebar')
-    .addToUi();
-}
+    <!-- MAIN UI -->
+    <div id="mainUI">
+      <!-- ==== DATA MANIPULATION CENTER ==== -->
+      <h2>Data Manipulation Center</h2>
 
-function showSidebar() {
-  const html = HtmlService.createHtmlOutputFromFile('CommandConsole')
-    .setTitle('Command Console');
-  SpreadsheetApp.getUi().showSidebar(html);
-}
+      <!-- RANGE SECTION -->
+      <div class="row">
+        <label>Start of Range:
+          <input id="rangeStart" class="cellInput" type="text" placeholder="e.g. A1" />
+        </label>
+        <label>End of Range:
+          <input id="rangeEnd" class="cellInput" type="text" placeholder="e.g. C10" />
+        </label>
+      </div>
 
-/*****************************************************
- *  PASSWORD VALIDATION
- *****************************************************/
+      <div class="row">
+        <div class="muted" id="rangeDisplay">Start: none | End: none</div>
+      </div>
 
-/**
- * Hidden hash-based check for password "sandwich".
- * The real password is never directly visible in the code.
- */
-function checkPassword(input) {
-  const hash = Utilities.base64Encode(
-    Utilities.computeDigest(
-      Utilities.DigestAlgorithm.SHA_256,
-      'sandwich'
-    )
-  );
-  const userHash = Utilities.base64Encode(
-    Utilities.computeDigest(
-      Utilities.DigestAlgorithm.SHA_256,
-      input
-    )
-  );
-  return userHash === hash;
-}
+      <!-- SUBSECTION -->
+      <hr>
+      <h3>Set Cell Values</h3>
 
-/*****************************************************
- *  TAB CREATION AND DELETION
- *****************************************************/
+      <div class="row">
+        <label>Cell set value:
+          <input id="cellValue" class="valueInput" type="text" placeholder="Type a value..." />
+        </label>
+      </div>
 
-/**
- * Creates many new tabs with random names.
- * Usage: createManyTabs(numTabs, prefix)
- */
-function createManyTabs(numTabs = 29, prefix = "t") {
-  const MAX_SAFE = 30;
-  if (numTabs <= 0) return;
-  if (numTabs > MAX_SAFE) throw new Error("Too many tabs requested. Limit: " + MAX_SAFE);
+      <div class="row">
+        <button onclick="executeSet()">Execute</button>
+        <button onclick="executeSetAll()">Execute All</button>
+      </div>
 
-  const ss = SpreadsheetApp.getActiveSpreadsheet();
-  const existingNames = ss.getSheets().map(s => s.getName());
-  let created = 0;
+      <div class="row">
+        <div class="muted" id="valueDisplay">Cell value: none</div>
+      </div>
 
-  for (let i = 0; i < numTabs; i++) {
-    const rand = Math.random().toString(36).substring(2, 10);
-    let name = `${prefix}${rand}_${i+1}`;
-    let suffix = 1;
-    while (existingNames.includes(name)) {
-      name = `${prefix}${rand}_${i+1}_${suffix++}`;
-    }
-    try {
-      ss.insertSheet(name);
-      existingNames.push(name);
-      created++;
-      if (created % 25 === 0) Utilities.sleep(50);
-    } catch (e) {
-      Logger.log("Failed to create sheet '" + name + "': " + e.message);
-    }
-  }
-  Logger.log(`Created ${created} sheets (requested ${numTabs}).`);
-  return created;
-}
+      <div class="row">
+        <div class="muted" id="executionStatus"></div>
+      </div>
 
-/**
- * Deletes sheets that start with the given prefix.
- */
-function deleteTestTabs(prefix = "t") {
-  const ss = SpreadsheetApp.getActiveSpreadsheet();
-  const sheets = ss.getSheets();
-  let deleted = 0;
+      <!-- BOLD SEPARATOR -->
+      <hr class="divider-strong">
 
-  if (!prefix || prefix.trim() === "")
-    throw new Error("Prefix required to avoid deleting all sheets.");
+      <!-- ==== TAB CREATION CENTER ==== -->
+      <h2>Tab Creation Center</h2>
+      <h3>Create Tabs</h3>
+      <div class="row">
+        <label>Tabs to create:
+          <input id="tabCount" class="numInput" type="number" value="10" min="1" max="30" />
+        </label>
+        <label>Prefix:
+          <input id="createPrefix" class="prefixInput" type="text" value="t" />
+        </label>
+      </div>
+      <div class="row">
+        <button id="createBtn" onclick="startCreate()">🧩 Create Random Tabs (with Progress)</button>
+        <button onclick="quickDelete()">🗑️ Quick Delete Test Tabs</button>
+      </div>
+      <div class="row">
+        <div class="bar"><div id="fillCreate" class="fill"></div></div>
+        <div id="statusCreate" class="muted">Create progress: 0% (0/0)</div>
+      </div>
 
-  for (let s of sheets) {
-    if (s.getName().startsWith(prefix)) {
-      try {
-        ss.deleteSheet(s);
-        deleted++;
-      } catch (e) {
-        Logger.log(`Couldn't delete sheet ${s.getName()}: ${e.message}`);
+      <hr>
+
+      <h3>Delete Tabs</h3>
+      <div class="row">
+        <label>Prefix to delete:
+          <input id="prefix" class="prefixInput" type="text" value="t" />
+        </label>
+        <button id="startBtn" onclick="startDelete()">⚙️ Delete Tabs (with Progress)</button>
+      </div>
+      <div class="row">
+        <div class="bar"><div id="fillDelete" class="fill"></div></div>
+        <div id="statusDelete" class="muted">Delete progress: 0% (0/0)</div>
+      </div>
+    </div>
+
+    <script>
+      /* ---------- PASSWORD ---------- */
+      function submitPassword() {
+        const p = document.getElementById('pw').value || '';
+        document.getElementById('pwMsg').textContent = 'Checking…';
+        google.script.run
+          .withSuccessHandler(ok => {
+            if (ok === true) {
+              document.getElementById('locked').style.display = 'none';
+              document.getElementById('mainUI').style.display = 'block';
+            } else {
+              document.getElementById('pwMsg').textContent = 'Incorrect password.';
+            }
+          })
+          .withFailureHandler(err => {
+            document.getElementById('pwMsg').textContent = 'Error checking password.';
+            console.error(err);
+          })
+          .checkPassword(p);
       }
-    }
-  }
-  Logger.log(`Deleted ${deleted} sheets with prefix '${prefix}'.`);
-  return deleted;
-}
 
-/**
- * Used for progressive deletion (returns names that start with prefix).
- */
-function listSheetsToDelete(prefix = "t") {
-  const ss = SpreadsheetApp.getActiveSpreadsheet();
-  return ss.getSheets()
-    .filter(s => s.getName().startsWith(prefix))
-    .map(s => s.getName());
-}
+      /* ---------- RANGE + VALUE INPUT ---------- */
+      const startInput = document.getElementById('rangeStart');
+      const endInput = document.getElementById('rangeEnd');
+      const valueInput = document.getElementById('cellValue');
+      const rangeDisplay = document.getElementById('rangeDisplay');
+      const valueDisplay = document.getElementById('valueDisplay');
+      const executionStatus = document.getElementById('executionStatus');
 
-/**
- * Deletes a single sheet by name (used in progressive loop).
- */
-function deleteSheetByName(name) {
-  const ss = SpreadsheetApp.getActiveSpreadsheet();
-  const sheet = ss.getSheetByName(name);
-  if (sheet) {
-    ss.deleteSheet(sheet);
-    return { deleted: true };
-  }
-  return { deleted: false };
-}
+      function updateRangeDisplay() {
+        const s = startInput.value.trim() || "none";
+        const e = endInput.value.trim() || "none";
+        rangeDisplay.textContent = `Start: ${s} | End: ${e}`;
+      }
 
-/**
- * Helper for the sidebar — returns the max safe number of tabs.
- */
-function getCreateMaxSafe() {
-  return 30;
-}
+      function updateValueDisplay() {
+        const v = valueInput.value.trim() || "none";
+        valueDisplay.textContent = `Cell value: ${v}`;
+      }
 
-/**
- * Creates one random tab (for progressive creation).
- */
-function createOneRandomTab(prefix = "t") {
-  const ss = SpreadsheetApp.getActiveSpreadsheet();
-  const rand = Math.random().toString(36).substring(2, 10);
-  const name = `${prefix}${rand}`;
-  ss.insertSheet(name);
-  return name;
-}
+      startInput.addEventListener('input', updateRangeDisplay);
+      endInput.addEventListener('input', updateRangeDisplay);
+      valueInput.addEventListener('input', updateValueDisplay);
 
-/*****************************************************
- *  DATA MANIPULATION CENTER FUNCTIONS
- *****************************************************/
+      function readInputs() {
+        const start = startInput.value.trim();
+        const end = endInput.value.trim();
+        const val = valueInput.value.trim();
+        if (!start || !end || !val) {
+          executionStatus.textContent = "⚠️ Please fill in start, end, and value fields first.";
+          return null;
+        }
+        return { start, end, val };
+      }
 
-/**
- * Sets every cell in startCell:endCell to the given value on the ACTIVE sheet.
- * Returns total number of cells affected.
- */
-function setRangeValue(startCell, endCell, value) {
-  const sheet = SpreadsheetApp.getActiveSheet();
-  const range = sheet.getRange(`${startCell}:${endCell}`);
-  range.setValue(value);
-  return range.getNumRows() * range.getNumColumns();
-}
+      function executeSet() {
+        const args = readInputs();
+        if (!args) return;
+        executionStatus.textContent = "Running...";
+        google.script.run
+          .withSuccessHandler(count => {
+            executionStatus.textContent = `✅ Set ${count} cells from ${args.start} to ${args.end} to "${args.val}" on the active sheet.`;
+          })
+          .withFailureHandler(err => {
+            executionStatus.textContent = `❌ Error: ${err.message || err}`;
+          })
+          .setRangeValue(args.start, args.end, args.val);
+      }
 
-/**
- * Sets the same range across EVERY sheet in the spreadsheet.
- * Returns { sheets: count, cells: total }.
- */
-function setRangeValueAllSheets(startCell, endCell, value) {
-  const ss = SpreadsheetApp.getActiveSpreadsheet();
-  const sheets = ss.getSheets();
-  let totalCells = 0;
-  let okSheets = 0;
+      function executeSetAll() {
+        const args = readInputs();
+        if (!args) return;
+        executionStatus.textContent = "Running on all sheets...";
+        google.script.run
+          .withSuccessHandler(res => {
+            executionStatus.textContent = `✅ Set ${res.cells} cells across ${res.sheets} sheets from ${args.start} to ${args.end} to "${args.val}".`;
+          })
+          .withFailureHandler(err => {
+            executionStatus.textContent = `❌ Error: ${err.message || err}`;
+          })
+          .setRangeValueAllSheets(args.start, args.end, args.val);
+      }
 
-  for (const sh of sheets) {
-    try {
-      const range = sh.getRange(`${startCell}:${endCell}`);
-      range.setValue(value);
-      totalCells += range.getNumRows() * range.getNumColumns();
-      okSheets++;
-    } catch (e) {
-      Logger.log(`Skipped sheet '${sh.getName()}': ${e.message}`);
-    }
-  }
+      /* ---------- TAB CREATION + DELETE CENTER ---------- */
+      let creating = false, createTotal = 0, createDone = 0;
+      function setCreateProgress() {
+        const pct = createTotal === 0 ? 0 : Math.round((createDone / createTotal) * 100);
+        document.getElementById('fillCreate').style.width = pct + '%';
+        document.getElementById('statusCreate').textContent =
+          `Create progress: ${pct}% (${createDone}/${createTotal})`;
+      }
 
-  return { sheets: okSheets, cells: totalCells };
-}
+      function startCreate() {
+        if (creating) return;
+        const numTabs = Math.max(1, Math.min(30, parseInt(document.getElementById('tabCount').value || '1', 10)));
+        const prefix = (document.getElementById('createPrefix').value || 't').trim() || 't';
+        google.script.run.withSuccessHandler(maxSafe => {
+          const capped = Math.min(numTabs, maxSafe || 30);
+          creating = true; createTotal = capped; createDone = 0;
+          document.getElementById('createBtn').disabled = true;
+          setCreateProgress();
+          createNext(prefix);
+        }).getCreateMaxSafe();
+      }
+
+      function createNext(prefix) {
+        if (createDone >= createTotal) {
+          creating = false;
+          document.getElementById('createBtn').disabled = false;
+          setCreateProgress();
+          return;
+        }
+        google.script.run
+          .withSuccessHandler(() => { createDone++; setCreateProgress(); createNext(prefix); })
+          .withFailureHandler(err => { console.log('Create error:', err); createDone++; setCreateProgress(); createNext(prefix); })
+          .createOneRandomTab(prefix);
+      }
+
+      function quickDelete() {
+        const prefix = (document.getElementById('createPrefix').value || 't').trim() || 't';
+        document.getElementById('statusDelete').textContent = `Quick delete started for prefix "${prefix}"…`;
+        google.script.run
+          .withSuccessHandler(() => { document.getElementById('statusDelete').textContent = `Quick delete finished for "${prefix}".`; })
+          .withFailureHandler(err => { document.getElementById('statusDelete').textContent = `Error: ${err.message || err}`; })
+          .deleteTestTabs(prefix);
+      }
+
+      let deleting = false, queue = [], delTotal = 0, delDone = 0;
+      function setDeleteProgress() {
+        const pct = delTotal === 0 ? 0 : Math.round((delDone / delTotal) * 100);
+        document.getElementById('fillDelete').style.width = pct + '%';
+        document.getElementById('statusDelete').textContent =
+          `Delete progress: ${pct}% (${delDone}/${delTotal})`;
+      }
+
+      function startDelete() {
+        if (deleting) return;
+        delDone = 0; setDeleteProgress();
+        document.getElementById('startBtn').disabled = true;
+        const prefix = (document.getElementById('prefix').value || '').trim();
+        google.script.run
+          .withSuccessHandler(names => {
+            queue = names || [];
+            delTotal = queue.length;
+            setDeleteProgress();
+            if (delTotal === 0) {
+              document.getElementById('statusDelete').textContent = 'No matching tabs found.';
+              document.getElementById('startBtn').disabled = false;
+              return;
+            }
+            deleting = true;
+            deleteNext();
+          })
+          .withFailureHandler(err => {
+            document.getElementById('statusDelete').textContent = `Error: ${err.message || err}`;
+            document.getElementById('startBtn').disabled = false;
+          })
+          .listSheetsToDelete(prefix);
+      }
+
+      function deleteNext() {
+        if (queue.length === 0) {
+          setDeleteProgress();
+          deleting = false;
+          document.getElementById('startBtn').disabled = false;
+          return;
+        }
+        const name = queue.shift();
+        google.script.run
+          .withSuccessHandler(result => { if (result && result.deleted) delDone++; setDeleteProgress(); deleteNext(); })
+          .withFailureHandler(err => { console.log('Delete error for', name, err); setDeleteProgress(); deleteNext(); })
+          .deleteSheetByName(name);
+      }
+    </script>
+  </body>
+</html>
