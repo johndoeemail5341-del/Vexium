@@ -19,7 +19,7 @@
       .numInput { width: 90px; }
       .prefixInput { width: 90px; }
       .cellInput { width: 120px; }
-      .valueInput { width: 350px; height: 36px; font-size: 14px; border-radius: 4px; }
+      .valueInput { width: 150px; }
     </style>
   </head>
   <body>
@@ -27,8 +27,12 @@
     <div id="locked">
       <h2>Enter Password</h2>
       <div class="muted">this console is password protected</div>
-      <div class="row"><input id="pw" type="password" placeholder="Password" /></div>
-      <div class="row"><button onclick="submitPassword()">Unlock</button></div>
+      <div class="row">
+        <input id="pw" type="password" placeholder="Password" />
+      </div>
+      <div class="row">
+        <button id="unlockBtn" onclick="submitPassword()">Unlock</button>
+      </div>
       <div id="pwMsg" class="muted"></div>
     </div>
 
@@ -46,28 +50,39 @@
           <input id="rangeEnd" class="cellInput" type="text" placeholder="e.g. C10" />
         </label>
       </div>
-      <div class="row"><div class="muted" id="rangeDisplay">Start: none | End: none</div></div>
+
+      <div class="row">
+        <div class="muted" id="rangeDisplay">Start: none | End: none</div>
+      </div>
 
       <!-- SUBSECTION -->
       <hr>
       <h3>Set Cell Values</h3>
+
       <div class="row">
-        <label>Cell set value:</label>
-        <input id="cellValue" class="valueInput" type="text" placeholder="Type a value..." />
+        <label>Cell set value:
+          <input id="cellValue" class="valueInput" type="text" placeholder="Type a value..." />
+        </label>
       </div>
+
       <div class="row">
         <button onclick="executeSet()">Execute</button>
         <button onclick="executeSetAll()">Execute All</button>
       </div>
-      <div class="row"><div class="muted" id="valueDisplay">Cell value: none</div></div>
-      <div class="row"><div class="muted" id="executionStatus"></div></div>
+
+      <div class="row">
+        <div class="muted" id="valueDisplay">Cell value: none</div>
+      </div>
+
+      <div class="row">
+        <div class="muted" id="executionStatus"></div>
+      </div>
 
       <!-- BOLD SEPARATOR -->
       <hr class="divider-strong">
 
       <!-- ==== TAB CREATION CENTER ==== -->
       <h2>Tab Creation Center</h2>
-
       <h3>Create Tabs</h3>
       <div class="row">
         <label>Tabs to create:
@@ -102,161 +117,186 @@
     </div>
 
     <script>
-      /* ---------- PASSWORD ---------- */
+      /* ---------- PASSWORD HANDLER ---------- */
+      function setPwMsg(msg) {
+        document.getElementById("pwMsg").textContent = msg || "";
+      }
+
       function submitPassword() {
-        const p = document.getElementById('pw').value || '';
-        const msg = document.getElementById('pwMsg');
-        msg.textContent = 'Checking…';
+        const btn = document.getElementById("unlockBtn");
+        const input = document.getElementById("pw");
+        const val = (input.value || "").trim();
+
+        btn.disabled = true;
+        setPwMsg("Checking…");
+
         google.script.run
           .withSuccessHandler(ok => {
             if (ok === true) {
-              document.getElementById('locked').remove();
-              document.getElementById('mainUI').style.display = 'block';
+              document.getElementById("locked").style.display = "none";
+              document.getElementById("mainUI").style.display = "block";
+              setPwMsg("");
             } else {
-              msg.textContent = 'Incorrect password.';
+              setPwMsg("Incorrect password.");
+              btn.disabled = false;
+              input.focus();
+              input.select();
             }
           })
           .withFailureHandler(err => {
-            msg.textContent = 'Error checking password.';
-            console.error(err);
+            setPwMsg("Error checking password: " + (err && err.message ? err.message : err));
+            btn.disabled = false;
           })
-          .checkPassword(p);
+          .checkPassword(val);
       }
 
-      /* ---------- DATA MANIPULATION UI ---------- */
-      const startInput = document.getElementById('rangeStart');
-      const endInput = document.getElementById('rangeEnd');
-      const valueInput = document.getElementById('cellValue');
-      const rangeDisplay = document.getElementById('rangeDisplay');
-      const valueDisplay = document.getElementById('valueDisplay');
-      const executionStatus = document.getElementById('executionStatus');
+      /* ---------- RANGE + VALUE INPUT ---------- */
+      const startInput = document.getElementById("rangeStart");
+      const endInput = document.getElementById("rangeEnd");
+      const valueInput = document.getElementById("cellValue");
+      const rangeDisplay = document.getElementById("rangeDisplay");
+      const valueDisplay = document.getElementById("valueDisplay");
+      const executionStatus = document.getElementById("executionStatus");
 
-      function updateRangeDisplay(){
-        const s = startInput.value.trim() || 'none';
-        const e = endInput.value.trim() || 'none';
+      function updateRangeDisplay() {
+        const s = startInput.value.trim() || "none";
+        const e = endInput.value.trim() || "none";
         rangeDisplay.textContent = `Start: ${s} | End: ${e}`;
       }
-      function updateValueDisplay(){
-        const v = valueInput.value.trim() || 'none';
+      function updateValueDisplay() {
+        const v = valueInput.value.trim() || "none";
         valueDisplay.textContent = `Cell value: ${v}`;
       }
-      startInput.addEventListener('input', updateRangeDisplay);
-      endInput.addEventListener('input', updateRangeDisplay);
-      valueInput.addEventListener('input', updateValueDisplay);
 
-      function readInputs(){
+      startInput.addEventListener("input", updateRangeDisplay);
+      endInput.addEventListener("input", updateRangeDisplay);
+      valueInput.addEventListener("input", updateValueDisplay);
+
+      function readInputs() {
         const start = startInput.value.trim();
         const end = endInput.value.trim();
         const val = valueInput.value.trim();
-        if(!start || !end || !val){
+        if (!start || !end || !val) {
           executionStatus.textContent = "⚠️ Please fill in start, end, and value fields first.";
           return null;
         }
-        return {start, end, val};
+        return { start, end, val };
       }
 
-      function executeSet(){
-        const args = readInputs(); if(!args) return;
+      function executeSet() {
+        const args = readInputs();
+        if (!args) return;
         executionStatus.textContent = "Running...";
         google.script.run
-          .withSuccessHandler(count => executionStatus.textContent =
-            `✅ Set ${count} cells from ${args.start} to ${args.end} to "${args.val}" on the active sheet.`)
-          .withFailureHandler(err => executionStatus.textContent = `❌ Error: ${err.message || err}`)
+          .withSuccessHandler(count => {
+            executionStatus.textContent = `✅ Set ${count} cells from ${args.start} to ${args.end} to "${args.val}" on the active sheet.`;
+          })
+          .withFailureHandler(err => {
+            executionStatus.textContent = `❌ Error: ${err.message || err}`;
+          })
           .setRangeValue(args.start, args.end, args.val);
       }
-      function executeSetAll(){
-        const args = readInputs(); if(!args) return;
+
+      function executeSetAll() {
+        const args = readInputs();
+        if (!args) return;
         executionStatus.textContent = "Running on all sheets...";
         google.script.run
-          .withSuccessHandler(res => executionStatus.textContent =
-            `✅ Set ${res.cells} cells across ${res.sheets} sheets from ${args.start} to ${args.end} to "${args.val}".`)
-          .withFailureHandler(err => executionStatus.textContent = `❌ Error: ${err.message || err}`)
+          .withSuccessHandler(res => {
+            executionStatus.textContent = `✅ Set ${res.cells} cells across ${res.sheets} sheets from ${args.start} to ${args.end} to "${args.val}".`;
+          })
+          .withFailureHandler(err => {
+            executionStatus.textContent = `❌ Error: ${err.message || err}`;
+          })
           .setRangeValueAllSheets(args.start, args.end, args.val);
       }
 
-      /* ---------- TAB CREATION ---------- */
-      let creating=false, createTotal=0, createDone=0;
-      function setCreateProgress(){
-        const pct = createTotal===0 ? 0 : Math.round((createDone/createTotal)*100);
-        document.getElementById('fillCreate').style.width = pct + '%';
-        document.getElementById('statusCreate').textContent =
-          `Create progress: ${pct}% (${createDone}/${createTotal})`;
+      /* ---------- TAB CREATION + DELETION ---------- */
+      let creating = false, createTotal = 0, createDone = 0;
+      function setCreateProgress() {
+        const pct = createTotal === 0 ? 0 : Math.round((createDone / createTotal) * 100);
+        document.getElementById("fillCreate").style.width = pct + "%";
+        document.getElementById("statusCreate").textContent = `Create progress: ${pct}% (${createDone}/${createTotal})`;
       }
-      function startCreate(){
+
+      function startCreate() {
         if (creating) return;
-        const numTabs = Math.max(1, Math.min(30, parseInt(document.getElementById('tabCount').value || '1',10)));
-        const prefix = (document.getElementById('createPrefix').value || 't').trim() || 't';
+        const numTabs = Math.max(1, Math.min(30, parseInt(document.getElementById("tabCount").value || "1", 10)));
+        const prefix = (document.getElementById("createPrefix").value || "t").trim() || "t";
         google.script.run.withSuccessHandler(maxSafe => {
           const capped = Math.min(numTabs, maxSafe || 30);
           creating = true; createTotal = capped; createDone = 0;
-          document.getElementById('createBtn').disabled = true;
+          document.getElementById("createBtn").disabled = true;
           setCreateProgress();
           createNext(prefix);
         }).getCreateMaxSafe();
       }
-      function createNext(prefix){
-        if (createDone >= createTotal){
+
+      function createNext(prefix) {
+        if (createDone >= createTotal) {
           creating = false;
-          document.getElementById('createBtn').disabled = false;
+          document.getElementById("createBtn").disabled = false;
           setCreateProgress();
           return;
         }
         google.script.run
           .withSuccessHandler(() => { createDone++; setCreateProgress(); createNext(prefix); })
-          .withFailureHandler(err => { console.log('Create error:', err); createDone++; setCreateProgress(); createNext(prefix); })
+          .withFailureHandler(err => { console.log("Create error:", err); createDone++; setCreateProgress(); createNext(prefix); })
           .createOneRandomTab(prefix);
       }
 
-      /* ---------- QUICK DELETE (no progress) ---------- */
-      function quickDelete(){
-        const prefix = (document.getElementById('createPrefix').value || 't').trim() || 't';
-        document.getElementById('statusDelete').textContent = `Quick delete started for prefix "${prefix}"…`;
+      function quickDelete() {
+        const prefix = (document.getElementById("createPrefix").value || "t").trim() || "t";
+        document.getElementById("statusDelete").textContent = `Quick delete started for prefix "${prefix}"…`;
         google.script.run
-          .withSuccessHandler(() => { document.getElementById('statusDelete').textContent = `Quick delete finished for "${prefix}".`; })
-          .withFailureHandler(err => { document.getElementById('statusDelete').textContent = `Error: ${err.message || err}`; })
+          .withSuccessHandler(() => { document.getElementById("statusDelete").textContent = `Quick delete finished for "${prefix}".`; })
+          .withFailureHandler(err => { document.getElementById("statusDelete").textContent = `Error: ${err.message || err}`; })
           .deleteTestTabs(prefix);
       }
 
-      /* ---------- DELETE WITH PROGRESS ---------- */
-      let deleting=false, queue=[], delTotal=0, delDone=0;
-      function setDeleteProgress(){
-        const pct = delTotal===0 ? 0 : Math.round((delDone/delTotal)*100);
-        document.getElementById('fillDelete').style.width = pct + '%';
-        document.getElementById('statusDelete').textContent =
-          `Delete progress: ${pct}% (${delDone}/${delTotal})`;
+      let deleting = false, queue = [], delTotal = 0, delDone = 0;
+      function setDeleteProgress() {
+        const pct = delTotal === 0 ? 0 : Math.round((delDone / delTotal) * 100);
+        document.getElementById("fillDelete").style.width = pct + "%";
+        document.getElementById("statusDelete").textContent = `Delete progress: ${pct}% (${delDone}/${delTotal})`;
       }
-      function startDelete(){
+
+      function startDelete() {
         if (deleting) return;
         delDone = 0; setDeleteProgress();
-        document.getElementById('startBtn').disabled = true;
-        const prefix = (document.getElementById('prefix').value || '').trim();
+        document.getElementById("startBtn").disabled = true;
+        const prefix = (document.getElementById("prefix").value || "").trim();
         google.script.run
           .withSuccessHandler(names => {
-            queue = names || []; delTotal = queue.length; setDeleteProgress();
-            if (delTotal === 0){
-              document.getElementById('statusDelete').textContent = 'No matching tabs found.';
-              document.getElementById('startBtn').disabled = false;
+            queue = names || [];
+            delTotal = queue.length;
+            setDeleteProgress();
+            if (delTotal === 0) {
+              document.getElementById("statusDelete").textContent = "No matching tabs found.";
+              document.getElementById("startBtn").disabled = false;
               return;
             }
-            deleting = true; deleteNext();
+            deleting = true;
+            deleteNext();
           })
           .withFailureHandler(err => {
-            document.getElementById('statusDelete').textContent = `Error: ${err.message || err}`;
-            document.getElementById('startBtn').disabled = false;
+            document.getElementById("statusDelete").textContent = `Error: ${err.message || err}`;
+            document.getElementById("startBtn").disabled = false;
           })
           .listSheetsToDelete(prefix);
       }
-      function deleteNext(){
-        if (queue.length === 0){
+
+      function deleteNext() {
+        if (queue.length === 0) {
           setDeleteProgress();
           deleting = false;
-          document.getElementById('startBtn').disabled = false;
+          document.getElementById("startBtn").disabled = false;
           return;
         }
         const name = queue.shift();
         google.script.run
           .withSuccessHandler(result => { if (result && result.deleted) delDone++; setDeleteProgress(); deleteNext(); })
-          .withFailureHandler(err => { console.log('Delete error for', name, err); setDeleteProgress(); deleteNext(); })
+          .withFailureHandler(err => { console.log("Delete error for", name, err); setDeleteProgress(); deleteNext(); })
           .deleteSheetByName(name);
       }
     </script>
