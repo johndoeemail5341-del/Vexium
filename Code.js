@@ -19,30 +19,8 @@ function _normBool(v){ if(v===true)return true;const s=String(v).trim().toLowerC
 function _normText(v){return String(v==null?"":v).trim();}
 function escapeHtml_(s){return String(s).replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));}
 
-/* ---------- Per-user bypass helper ---------- */
-function _userBypassFlag(){
-  try{
-    const p = PropertiesService.getUserProperties().getProperty("VEXIUM_BYPASS");
-    return p === "1";
-  }catch(e){return false;}
-}
-function _setUserBypassFlag(val){
-  try{
-    if(val) PropertiesService.getUserProperties().setProperty("VEXIUM_BYPASS","1");
-    else PropertiesService.getUserProperties().deleteProperty("VEXIUM_BYPASS");
-    return true;
-  }catch(e){return false;}
-}
-
 /* ---------- Lockdown Check ---------- */
 function isExternalLockdownActive(){
-  // If user has set bypass for themselves, treat as not locked for this user
-  try{
-    if(_userBypassFlag()) return {on:false,bypassed:true};
-  }catch(e){
-    // ignore and continue to check sheet
-  }
-
   try{
     const ss=SpreadsheetApp.openById(EXTERNAL_SHEET_ID);
     const admin=ss.getSheetByName(ADMIN_PANEL_SHEET_NAME);
@@ -74,52 +52,6 @@ function isAuthorizedUser_(emailB64){
   }catch(e){return!!FAIL_CLOSED;}
 }
 
-/* ---------- Owner bypass list (F2:F100) ---------- */
-function isOwnerBypassAvailable(){
-  try{
-    const email = (() => { try { return Session.getActiveUser().getEmail(); } catch(_) { return ""; } })();
-    if(!email) return false;
-    const emailB64 = Utilities.base64Encode(email);
-    const ss=SpreadsheetApp.openById(EXTERNAL_SHEET_ID);
-    const sh=ss.getSheetByName(AUTHORIZED_SHEET_NAME);
-    if(!sh) return !!FAIL_CLOSED;
-    const rangeList = sh.getRange("F2:F100").getDisplayValues().flat().map(_normText).filter(Boolean);
-    return rangeList.includes(emailB64);
-  }catch(e){
-    return !!FAIL_CLOSED;
-  }
-}
-
-/* ---------- Attempt bypass (server-side) ---------- */
-function attemptBypass(){
-  try{
-    // ensure lockdown is currently active (sheet) before allowing bypass
-    const lockdown = (function(){
-      try{
-        const ss=SpreadsheetApp.openById(EXTERNAL_SHEET_ID);
-        const admin = ss.getSheetByName(ADMIN_PANEL_SHEET_NAME);
-        if(!admin) return !!FAIL_CLOSED;
-        const b7Val=admin.getRange("B7").getValue();
-        const b7Disp=admin.getRange("B7").getDisplayValue();
-        const b10=_normText(admin.getRange("B10").getDisplayValue()).toLowerCase();
-        return (_normBool(b7Val)||_normBool(b7Disp)) && (b10==="lockdown9");
-      }catch(e){ return !!FAIL_CLOSED; }
-    })();
-
-    if(!lockdown) return {ok:false,reason:"not_locked"};
-
-    // check owner list
-    if(!isOwnerBypassAvailable()) return {ok:false,reason:"not_owner"};
-
-    // set per-user bypass flag
-    const okSet = _setUserBypassFlag(true);
-    if(!okSet) return {ok:false,reason:"set_failed"};
-    return {ok:true};
-  }catch(e){
-    return {ok:false,reason:"error"};
-  }
-}
-
 /* ---------- Menu / UI ---------- */
 function onOpen(){
   SpreadsheetApp.getUi().createMenu("Vexium")
@@ -128,7 +60,26 @@ function onOpen(){
 }
 
 function openVexiumUI(){
-  // Always load the remote HTML so client can render lockdown + admin bypass UI.
+  const lock=isExternalLockdownActive();
+  if(lock.on){
+    const htmlLock=HtmlService.createHtmlOutput(`
+<!doctype html><meta charset="utf-8">
+<style>
+body{font-family:system-ui,Segoe UI,Arial;display:flex;min-height:100vh;align-items:center;justify-content:center;background:#fafafa;margin:0}
+.card{max-width:760px;background:#fff;border:1px solid #eee;border-radius:16px;box-shadow:0 8px 24px rgba(0,0,0,.06);padding:28px;text-align:center}
+h1{margin:0 0 8px;font-size:28px}
+.owner{margin-top:14px;text-align:left;background:#f8fafc;border:1px solid #e5e7eb;border-radius:10px;padding:12px;max-height:260px;overflow:auto;white-space:pre-wrap}
+small{display:block;margin-top:10px;color:#777}
+</style>
+<div class="card">
+  <h1>${escapeHtml_(lock.message)}</h1>
+  <div class="owner"><strong>Owner message</strong><br>${escapeHtml_(lock.owner)}</div>
+  <small>Triggered by Admin Panel</small>
+</div>`).setWidth(1000).setHeight(1000).setTitle("Vexium");
+    SpreadsheetApp.getUi().showModalDialog(htmlLock,"Vexium");
+    return;
+  }
+
   const res=UrlFetchApp.fetch(RAW_HTML_URL+"?v="+Date.now(),{muteHttpExceptions:true,followRedirects:true});
   if(res.getResponseCode()!==200){SpreadsheetApp.getUi().alert("Failed to load Vexium UI from GitHub.");return;}
   const html=HtmlService.createHtmlOutput(res.getContentText()).setWidth(1000).setHeight(1000).setTitle("Vexium");
