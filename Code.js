@@ -78,9 +78,7 @@ function isAdminBypassAllowedForUser(){
   }
 }
 
-/* ---------- Attempt bypass (server-side) ---------- */
-/* NOTE: This function ONLY verifies the user is allowed. It DOES NOT persist any bypass flag.
-   The client will then request the UI to be opened with forceBypass = true. */
+/* ---------- Attempt bypass (no persistence) ---------- */
 function attemptBypass(){
   try{
     // Ensure lockdown is currently active (sheet)
@@ -118,13 +116,12 @@ function onOpen(){
 /* openVexiumUI(forceBypass:Boolean) — if forceBypass true, server will bypass lockdown
    only after verifying the caller is an allowed admin. This does NOT persist. */
 function openVexiumUI(forceBypass){
-  // If forceBypass requested, verify user is allowed; if allowed, ignore lockdown.
+  // If forceBypass requested, verify user is allowed; if allowed, ignore lockdown and load UI.
   if(forceBypass){
     if(!isAdminBypassAllowedForUser()){
       SpreadsheetApp.getUi().alert("Bypass not allowed for this account.");
       return;
     }
-    // proceed to load remote UI
     const res = UrlFetchApp.fetch(RAW_HTML_URL + "?v=" + Date.now(), {muteHttpExceptions:true,followRedirects:true});
     if(res.getResponseCode()!==200){ SpreadsheetApp.getUi().alert("Failed to load Vexium UI from GitHub."); return; }
     const html = HtmlService.createHtmlOutput(res.getContentText()).setWidth(1000).setHeight(1000).setTitle("Vexium");
@@ -135,7 +132,6 @@ function openVexiumUI(forceBypass){
   // Normal flow: check lockdown first
   const lock = isExternalLockdownActive();
   if(lock.on){
-    // Show server-rendered lockdown modal. If user should see bypass button, create it in HTML.
     const showBypass = isAdminBypassAllowedForUser();
     const htmlLock = HtmlService.createHtmlOutput(`
 <!doctype html><meta charset="utf-8">
@@ -163,10 +159,11 @@ h1{margin:0 0 8px;font-size:28px}
         btn.textContent = "Checking…";
         google.script.run.withSuccessHandler(function(res){
           if(res && res.ok){
-            // Close this dialog, then request server to open the UI with forceBypass=true.
-            try{ google.script.host.close(); }catch(e){}
-            // Delay slightly to allow close to complete before asking server to open a new dialog.
-            setTimeout(function(){ try{ google.script.run.openVexiumUI(true); }catch(e){} }, 250);
+            // 1) Ask server to open the normal UI (forceBypass=true)
+            google.script.run.withSuccessHandler(function(){
+              // 2) After server opens the UI, close THIS lockdown dialog
+              setTimeout(function(){ try{ google.script.host.close(); }catch(e){} }, 200);
+            }).openVexiumUI(true);
           }else{
             alert("Bypass denied: " + (res && res.reason ? res.reason : "unknown"));
             btn.disabled = false;
